@@ -16,9 +16,12 @@
     "ejs": "^3.1.10",
     "express": "^5.1.0",
     "express-session": "^1.17.3",
-    "mongoose": "^8.18.0",
+    "mongoos": "^0.0.1-security",
+    "mongoose": "^8.18.1",
     "passport": "^0.6.0",
-    "passport-local": "^1.0.0"
+    "passport-local": "^1.0.0",
+    "socket": "^1.1.4",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

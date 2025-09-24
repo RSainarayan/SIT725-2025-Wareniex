@@ -1,12 +1,27 @@
 const express = require('express');
 const path = require('path');
 const mongoose = require('mongoose');
+const http = require('http');
+const socketio = require('socket.io');
 
 const productRoutes = require('./routes/productRoutes');
 const uiRoutes = require('./routes/uiRoutes');
+const stockIntakeRoutes = require('./routes/stockIntakeRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const server = http.createServer(app);
+const io = socketio(server);
+app.set('io', io); // Make io accessible in controllers
+let liveUserCount = 0;
+io.on('connection', (socket) => {
+  liveUserCount++;
+  io.emit('userCount', liveUserCount);
+  socket.on('disconnect', () => {
+    liveUserCount--;
+    io.emit('userCount', liveUserCount);
+  });
+});
+const PORT = process.env.PORT || 5000;
 
 // View engine
 app.set('views', path.join(__dirname, 'views'));
@@ -31,11 +46,12 @@ app.use('/', uiRoutes);
 
 // API / resource routes
 app.use('/products', productRoutes);
+app.use('/stock-intake', stockIntakeRoutes);
 
 app.get('/', (req, res) => res.redirect('/login'));
 
 // Connect to MongoDB (local by default)
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/warehouse';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/Wareniex';
 mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     console.log('Connected to MongoDB');
@@ -52,7 +68,7 @@ mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
       }
     })().catch(() => {});
 
-    app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
+    server.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
   })
   .catch(err => {
     console.error('MongoDB connection error:', err.message);

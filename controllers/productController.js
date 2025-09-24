@@ -14,6 +14,21 @@ exports.apiShow = async (req, res) => {
   res.json(product);
 };
 
+// API: get total quantity of all products
+exports.apiTotalQuantity = async (req, res) => {
+  try {
+    // Use aggregation to ensure numeric sum on the database side
+    const result = await Product.aggregate([
+      { $group: { _id: null, totalQuantity: { $sum: { $ifNull: ["$quantity", 0] } } } }
+    ]);
+    const totalQuantity = (result && result[0] && result[0].totalQuantity) ? result[0].totalQuantity : 0;
+    res.json({ totalQuantity });
+  } catch (err) {
+    console.error('Error computing total quantity', err);
+    res.status(500).json({ totalQuantity: 0 });
+  }
+};
+
 // Serve static HTML pages from views folder (if needed elsewhere)
 exports.pageNew = (req, res) => {
   res.render('products/new');
@@ -31,9 +46,13 @@ exports.pageShow = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { name, sku, quantity, location } = req.body;
+  let { name, sku, quantity, location, weight } = req.body;
+  console.log('Received weight:', weight); // Debug log
+  // Convert weight to number, allow 0 and decimals
+  weight = weight === '' || weight === undefined ? null : parseFloat(weight);
   try {
-    await Product.create({ name, sku, quantity, location });
+    await Product.create({ name, sku, quantity, location, weight });
+    req.app.get('io').emit('productCreated', { name, sku, quantity, location, weight });
     res.redirect('/products');
   } catch (err) {
     res.status(400).send('Error creating product: ' + err.message);
@@ -41,6 +60,7 @@ exports.create = async (req, res) => {
 };
 
 exports.delete = async (req, res) => {
-  await Product.findByIdAndDelete(req.params.id);
-  res.redirect('/products');
+  const deleted = await Product.findByIdAndDelete(req.params.id);
+  req.app.get('io').emit('productDeleted', { _id: req.params.id });
+  res.redirect('/dashboard.html');
 };

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Products</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f7f7fa;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 40px auto;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      padding: 32px;
+    }
+    h1 {
+      color: #2d3748;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .add-btn {
+      display: block;
+      margin: 0 auto 32px auto;
+      padding: 10px 24px;
+      background: #4f8cff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+      text-decoration: none;
+      text-align: center;
+    }
+    .add-btn:hover {
+      background: #2563eb;
+    }
+    ul.product-list {
+      list-style: none;
+      padding: 0;
+    }
+    ul.product-list li {
+      background: #f1f5f9;
+      margin-bottom: 12px;
+      padding: 16px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .product-info {
+      flex: 1;
+    }
+    .product-name {
+      font-weight: 500;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .product-meta {
+      color: #64748b;
+      font-size: 14px;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Products</h1>
+    <a href="/products/new" class="add-btn">+ Add New Product</a>
+    <ul class="product-list" id="product-list">
+      <!-- Products will be loaded here dynamically -->
+    </ul>
+  </div>
+  <script>
+    async function loadProducts() {
+      const resp = await fetch('/products/data');
+      const products = await resp.json();
+      const list = document.getElementById('product-list');
+      if (!products.length) {
+        list.innerHTML = '<li class="product-meta">No products found</li>';
+        return;
+      }
+      list.innerHTML = products.map(p => `
+        <li>
+          <div class="product-info">
+            <a href="/products/${p._id}" class="product-name">${p.name}</a>
+            <div class="product-meta">
+              SKU: ${p.sku} &nbsp; | &nbsp; Qty: <span style="color:#2563eb;font-weight:500;">${p.quantity}</span> &nbsp; | &nbsp; Weight: <span style="color:#2563eb;font-weight:500;">${p.weight != null ? p.weight : 0}</span> kg
+            </div>
+          </div>
+        </li>
+      `).join('');
+    }
+    loadProducts();
+  </script>
+</body>
+</html>

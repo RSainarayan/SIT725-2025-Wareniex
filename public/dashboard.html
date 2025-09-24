@@ -10,12 +10,14 @@
 	<body>
 		<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
 			<div class="container-fluid">
-				<a class="navbar-brand" href="#">Warehouse</a>
+				<a class="navbar-brand" href="#">WARENIX - Inventory Automation System</a>
 				<div class="collapse navbar-collapse">
 								<ul class="navbar-nav ms-auto">
 									<li class="nav-item"><a class="nav-link" href="/products">Products</a></li>
+									<li class="nav-item"><a class="nav-link btn btn-sm btn-outline-light ms-2" href="/stock-intake">Stock Intake</a></li>
 									<li class="nav-item"><a class="nav-link" id="userEmail" href="#"></a></li>
 									<li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
+									<li class="nav-item"><a class="nav-link" id="adminNav" href="/admin" style="display:none">Admin</a></li>
 								</ul>
 				</div>
 			</div>
@@ -29,15 +31,24 @@
 				<div class="col-md-4" id="card-1"></div>
 				<div class="col-md-4" id="card-2"></div>
 				<div class="col-md-4" id="card-3"></div>
+				<div class="col-md-4">
+					<div class="card">
+						<div class="card-body text-center">
+							<h5 class="card-title">Live User Count</h5>
+							<div id="live-user-count" style="font-size:2rem;">—</div>
+						</div>
+					</div>
+				</div>
 			</div>
 
 			<section class="mt-4">
 				<h2>Recent Products</h2>
-				<div id="recent-products">Loading...</div>
+				<div id="recent-products" class="recent-products-list">Loading...</div>
 			</section>
 		</div>
 
 		<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+		<script src="/socket.io/socket.io.js"></script>
 
 		<!-- Load dashboard component and simple client script -->
 		<script>
@@ -49,7 +60,18 @@
 				document.getElementById(id).innerHTML = html;
 			}
 
-			loadCard('card-1', 'Total Products', '—');
+			// Update total products card with real-time quantity
+			async function updateTotalProductsCard() {
+				try {
+					const resp = await fetch('/products/data/total-quantity');
+					const data = await resp.json();
+					loadCard('card-1', 'Total Products', data.totalQuantity);
+				} catch (e) {
+					loadCard('card-1', 'Total Products', '—');
+				}
+			}
+			updateTotalProductsCard();
+
 			loadCard('card-2', 'Low Stock', '—');
 			loadCard('card-3', 'Pending Orders', '—');
 
@@ -57,22 +79,76 @@
 			async function loadRecent() {
 				const resp = await fetch('/products');
 				const text = await resp.text();
-				// crude: find the products list from returned HTML
-				const match = text.match(/<ul>[\s\S]*<\/ul>/);
+				// updated: find the products list from returned HTML with class selector
+				const match = text.match(/<ul class="product-list">[\s\S]*?<\/ul>/);
 				document.getElementById('recent-products').innerHTML = match ? match[0] : 'No data';
 			}
-					loadRecent();
+			loadRecent();
 
 					// show logged in user
 					(async function () {
-						try {
-							const r = await fetch('/me');
-							if (!r.ok) return;
-							const u = await r.json();
-							document.getElementById('userEmail').textContent = u.email || '';
-							document.getElementById('userEmail').href = '#';
-						} catch (e) {}
-					})();
+  try {
+    const r = await fetch('/me');
+    if (!r.ok) return;
+    const u = await r.json();
+    document.getElementById('userEmail').textContent = u.email || '';
+    document.getElementById('userEmail').href = '#';
+    if (u.role === 'admin') {
+      document.getElementById('adminNav').style.display = '';
+    } else {
+      document.getElementById('adminNav').style.display = 'none';
+    }
+  } catch (e) { console.error(e); }
+})();
+
+      const socket = io();
+      socket.on('productCreated', function(product) {
+        updateTotalProductsCard();
+        loadRecent();
+      });
+      socket.on('productDeleted', function(data) {
+        updateTotalProductsCard();
+        loadRecent();
+      });
+      socket.on('userCount', function(count) {
+        document.getElementById('live-user-count').textContent = count;
+      });
 		</script>
+
+			<style>
+				.recent-products-list ul.product-list {
+					list-style: none;
+					padding: 0;
+					margin: 0;
+				}
+				.recent-products-list ul.product-list li {
+					background: #f1f5f9;
+					margin-bottom: 12px;
+					padding: 16px;
+					border-radius: 6px;
+					display: flex;
+					justify-content: space-between;
+					align-items: center;
+					box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+				}
+				.recent-products-list .product-info {
+					flex: 1;
+				}
+				.recent-products-list .product-name {
+					font-weight: 500;
+					color: #2563eb;
+					text-decoration: none;
+				}
+				.recent-products-list .product-meta {
+					color: #64748b;
+					font-size: 14px;
+					margin-top: 4px;
+				}
+				.recent-products-list .no-products {
+					text-align: center;
+					color: #64748b;
+					margin-top: 32px;
+				}
+			</style>
 	</body>
 </html>
