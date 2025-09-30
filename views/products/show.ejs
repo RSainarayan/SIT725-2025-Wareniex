@@ -63,6 +63,7 @@
         <div>Weight: <span style="color:#2563eb;font-weight:500;"> <%= product.weight != null ? product.weight : 0 %> </span> kg</div>
         <div>Location: <%= product.location || '—' %></div>
       </div>
+      <a href="/products/<%= product._id %>/edit" class="btn btn-warning w-100 mb-2">Edit Product</a>
       <form id="deleteForm" action="/products/<%= product._id %>/delete" method="post">
         <button type="submit" class="btn btn-danger mb-2">Delete Product</button>
       </form>

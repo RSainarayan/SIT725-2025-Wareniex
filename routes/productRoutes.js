@@ -19,9 +19,11 @@ router.get('/data/total-quantity', productController.apiTotalQuantity);
 
 // Page-specific route (must come after API routes to avoid conflict)
 router.get('/:id', productController.pageShow);
+router.get('/:id/edit', productController.pageEdit);
 
 // Create / delete use traditional form posts
 router.post('/', productController.create);
 router.post('/:id/delete', productController.delete);
+router.post('/:id/edit', productController.edit);
 
 module.exports = router;
