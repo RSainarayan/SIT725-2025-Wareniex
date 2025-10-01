@@ -1,0 +1,395 @@
+require('../helpers/setup');
+const { connectTestDB, disconnectTestDB } = require('../helpers/database');
+const app = require('../../server');
+const StockIntake = require('../../models/StockIntake');
+const Product = require('../../models/Product');
+const { 
+  createTestProduct, 
+  createTestStockIntake, 
+  createTestUser, 
+  authenticateUser, 
+  cleanupTestData 
+} = require('../helpers/testUtils');
+
+describe('Stock Intake API Endpoints', () => {
+  
+  before(async function() {
+    this.timeout(30000);
+    await connectTestDB();
+  });
+
+  after(async function() {
+    this.timeout(30000);
+    await disconnectTestDB();
+  });
+  
+  beforeEach(async () => {
+    await cleanupTestData();
+  });
+
+  describe('GET /stock-intake/data', () => {
+    it('should return an empty array when no stock intakes exist', async () => {
+      const response = await request(app)
+        .get('/stock-intake/data')
+        .expect(200);
+
+      expect(response.body).to.be.an('array');
+      expect(response.body).to.have.length(0);
+    });
+
+    it('should return all stock intakes with populated product data', async () => {
+      const product1 = await createTestProduct({ 
+        name: 'Product 1', 
+        sku: 'PROD-001',
+        weight: 2.0 
+      });
+      
+      const product2 = await createTestProduct({ 
+        name: 'Product 2', 
+        sku: 'PROD-002',
+        weight: 1.5 
+      });
+
+      await createTestStockIntake({ 
+        product: product1,
+        quantity: 10,
+        totalWeight: 20.0,
+        singleWeight: 2.0,
+        receivedBy: 'user1@example.com'
+      });
+      
+      await createTestStockIntake({ 
+        product: product2,
+        quantity: 15,
+        totalWeight: 22.5,
+        singleWeight: 1.5,
+        receivedBy: 'user2@example.com'
+      });
+
+      const response = await request(app)
+        .get('/stock-intake/data')
+        .expect(200);
+
+      expect(response.body).to.be.an('array');
+      expect(response.body).to.have.length(2);
+      
+      // Check that intakes are returned with populated product data (newer first)
+      response.body.forEach(intake => {
+        expect(intake).to.have.property('_id');
+        expect(intake).to.have.property('product');
+        expect(intake).to.have.property('quantity');
+        expect(intake).to.have.property('totalWeight');
+        expect(intake).to.have.property('singleWeight');
+        expect(intake).to.have.property('receivedBy');
+        expect(intake).to.have.property('createdAt');
+        
+        // Check populated product data
+        expect(intake.product).to.be.an('object');
+        expect(intake.product).to.have.property('name');
+        expect(intake.product).to.have.property('sku');
+      });
+    });
+  });
+
+  describe('GET /stock-intake/data/:id', () => {
+    it('should return a specific stock intake by ID with populated product', async () => {
+      const product = await createTestProduct({
+        name: 'Test Product',
+        sku: 'TEST-123',
+        weight: 2.5
+      });
+
+      const intake = await createTestStockIntake({
+        product: product,
+        quantity: 20,
+        totalWeight: 50.0,
+        singleWeight: 2.5,
+        receivedBy: 'receiver@example.com'
+      });
+
+      const response = await request(app)
+        .get(`/stock-intake/data/${intake._id}`)
+        .expect(200);
+
+      expect(response.body).to.be.an('object');
+      expect(response.body._id).to.equal(intake._id.toString());
+      expect(response.body.quantity).to.equal(20);
+      expect(response.body.totalWeight).to.equal(50.0);
+      expect(response.body.singleWeight).to.equal(2.5);
+      expect(response.body.receivedBy).to.equal('receiver@example.com');
+      
+      // Check populated product
+      expect(response.body.product).to.be.an('object');
+      expect(response.body.product.name).to.equal('Test Product');
+      expect(response.body.product.sku).to.equal('TEST-123');
+    });
+
+    it('should return 404 for non-existent stock intake ID', async () => {
+      const nonExistentId = '507f1f77bcf86cd799439011';
+      
+      await request(app)
+        .get(`/stock-intake/data/${nonExistentId}`)
+        .expect(404);
+    });
+
+    it('should return 404 for invalid stock intake ID format', async () => {
+      const invalidId = 'invalid-id';
+      
+      await request(app)
+        .get(`/stock-intake/data/${invalidId}`)
+        .expect(404);
+    });
+  });
+
+  describe('POST /stock-intake', () => {
+    it('should create a new stock intake with valid data and update product quantity', async () => {
+      const product = await createTestProduct({
+        name: 'Intake Product',
+        sku: 'INTAKE-001',
+        quantity: 10,
+        weight: 1.5
+      });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 15.0,
+        receivedBy: 'warehouse@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(302); // Redirect after creation
+
+      // Verify stock intake was created
+      const createdIntake = await StockIntake.findOne({ 
+        product: product._id 
+      }).populate('product');
+      
+      expect(createdIntake).to.not.be.null;
+      expect(createdIntake.totalWeight).to.equal(15.0);
+      expect(createdIntake.singleWeight).to.equal(1.5);
+      expect(createdIntake.quantity).to.equal(10); // Math.floor(15.0 / 1.5)
+      expect(createdIntake.receivedBy).to.equal('warehouse@example.com');
+
+      // Verify product quantity was updated
+      const updatedProduct = await Product.findById(product._id);
+      expect(updatedProduct.quantity).to.equal(20); // Original 10 + new 10
+    });
+
+    it('should calculate quantity correctly based on total weight and unit weight', async () => {
+      const product = await createTestProduct({
+        weight: 2.5,
+        quantity: 5
+      });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 13.7, // Should result in Math.floor(13.7 / 2.5) = 5 items
+        receivedBy: 'test@example.com'
+      };
+
+      await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(302);
+
+      const createdIntake = await StockIntake.findOne({ product: product._id });
+      expect(createdIntake.quantity).to.equal(5); // Math.floor(13.7 / 2.5)
+
+      const updatedProduct = await Product.findById(product._id);
+      expect(updatedProduct.quantity).to.equal(10); // Original 5 + new 5
+    });
+
+    it('should return error for non-existent product', async () => {
+      const nonExistentProductId = '507f1f77bcf86cd799439011';
+
+      const intakeData = {
+        product: nonExistentProductId,
+        totalWeight: 10.0,
+        receivedBy: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(400);
+
+      expect(response.text).to.include('Product not found');
+    });
+
+    it('should return error for invalid total weight', async () => {
+      const product = await createTestProduct({ weight: 1.0 });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: -5.0, // Invalid negative weight
+        receivedBy: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(400);
+
+      expect(response.text).to.include('Invalid total weight');
+    });
+
+    it('should return error for zero total weight', async () => {
+      const product = await createTestProduct({ weight: 1.0 });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 0,
+        receivedBy: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(400);
+
+      expect(response.text).to.include('Invalid total weight');
+    });
+
+    it('should return error for product without valid unit weight', async () => {
+      const product = await createTestProduct({ 
+        weight: null // No unit weight configured
+      });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 10.0,
+        receivedBy: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(400);
+
+      expect(response.text).to.include('does not have a valid unit weight configured');
+    });
+
+    it('should return error for product with zero unit weight', async () => {
+      const product = await createTestProduct({ 
+        weight: 0 // Zero unit weight
+      });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 10.0,
+        receivedBy: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(400);
+
+      expect(response.text).to.include('does not have a valid unit weight configured');
+    });
+
+    it('should handle missing receivedBy field', async () => {
+      const product = await createTestProduct({ weight: 1.0 });
+
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 5.0
+        // receivedBy is missing
+      };
+
+      await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(302);
+
+      const createdIntake = await StockIntake.findOne({ product: product._id });
+      expect(createdIntake.receivedBy).to.equal('system'); // Default value
+    });
+  });
+
+  describe('POST /stock-intake/:id/delete', () => {
+    it('should delete an existing stock intake', async () => {
+      const product = await createTestProduct();
+      const intake = await createTestStockIntake({ product: product });
+
+      const response = await request(app)
+        .post(`/stock-intake/${intake._id}/delete`)
+        .expect(302); // Redirect after deletion
+
+      // Verify stock intake was deleted
+      const deletedIntake = await StockIntake.findById(intake._id);
+      expect(deletedIntake).to.be.null;
+    });
+
+    it('should handle deletion of non-existent stock intake gracefully', async () => {
+      const nonExistentId = '507f1f77bcf86cd799439011';
+
+      await request(app)
+        .post(`/stock-intake/${nonExistentId}/delete`)
+        .expect(302); // Should still redirect even if intake doesn't exist
+    });
+  });
+
+  describe('GET /stock-intake/', () => {
+    it('should render stock intake index page with populated data', async () => {
+      const product = await createTestProduct({ 
+        name: 'Display Product',
+        sku: 'DISPLAY-001'
+      });
+      
+      await createTestStockIntake({ 
+        product: product,
+        receivedBy: 'test-receiver@example.com'
+      });
+
+      const response = await request(app)
+        .get('/stock-intake/')
+        .expect(200);
+
+      expect(response.text).to.include('Display Product');
+      expect(response.text).to.include('DISPLAY-001');
+      expect(response.text).to.include('test-receiver@example.com');
+    });
+
+    it('should render empty index page when no intakes exist', async () => {
+      const response = await request(app)
+        .get('/stock-intake/')
+        .expect(200);
+
+      // Should render page without errors even with no data
+      expect(response.status).to.equal(200);
+    });
+  });
+
+  describe('GET /stock-intake/new', () => {
+    it('should render new stock intake form with available products', async () => {
+      await createTestProduct({ 
+        name: 'Available Product 1',
+        sku: 'AVAIL-001'
+      });
+      
+      await createTestProduct({ 
+        name: 'Available Product 2',
+        sku: 'AVAIL-002'
+      });
+
+      const response = await request(app)
+        .get('/stock-intake/new')
+        .expect(200);
+
+      expect(response.text).to.include('Available Product 1');
+      expect(response.text).to.include('Available Product 2');
+      expect(response.text).to.include('form');
+    });
+
+    it('should render form even when no products are available', async () => {
+      const response = await request(app)
+        .get('/stock-intake/new')
+        .expect(200);
+
+      expect(response.text).to.include('form');
+    });
+  });
+});

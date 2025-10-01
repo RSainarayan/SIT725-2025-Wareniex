@@ -25,12 +25,16 @@
 
 		<div class="container mt-4">
 			<h1 class="mb-3">Dashboard</h1>
+			
+			<!-- Notification area -->
+			<div id="notification-area" class="mb-3"></div>
 
 			<div class="row g-3">
 				<!-- Include dashboard cards component -->
 				<div class="col-md-4" id="card-1"></div>
 				<div class="col-md-4" id="card-2"></div>
 				<div class="col-md-4" id="card-3"></div>
+				<div class="col-md-4" id="card-4"></div>
 				<div class="col-md-4">
 					<div class="card">
 						<div class="card-body text-center">
@@ -39,11 +43,19 @@
 						</div>
 					</div>
 				</div>
+				<div class="col-md-4">
+							<div class="card">
+								<div class="card-body text-center">
+									<h5 class="card-title">Chatroom</h5>
+									<a href="/chat" class="btn btn-success">Start Chat</a>
+								</div>
+							</div>
+						</div>
 			</div>
 
 			<section class="mt-4">
 				<h2>Recent Products</h2>
-				<div id="recent-products" class="recent-products-list">Loading...</div>
+				<div id="recent-products" class="recent-products-table">Loading...</div>
 			</section>
 		</div>
 
@@ -53,10 +65,14 @@
 		<!-- Load dashboard component and simple client script -->
 		<script>
 			// fetch and insert component HTML into placeholders
-			async function loadCard(id, title, value) {
+			async function loadCard(id, title, value, cardClass = '') {
 				const resp = await fetch('/components/dashboard/dashboard-card.html');
 				const text = await resp.text();
-				const html = text.replace('{{title}}', title).replace('{{value}}', value);
+				const classAttr = cardClass ? ` border-${cardClass}` : '';
+				const html = text
+					.replace('{{title}}', title)
+					.replace('{{value}}', value)
+					.replace('class="card text-center"', `class="card text-center${classAttr}"`);
 				document.getElementById(id).innerHTML = html;
 			}
 
@@ -72,16 +88,74 @@
 			}
 			updateTotalProductsCard();
 
-			loadCard('card-2', 'Low Stock', '—');
+			// Update product and unit count cards
+			async function updateProductAndUnitCountCards() {
+				try {
+					const resp = await fetch('/products/data');
+					const products = await resp.json();
+					const productCount = products.length;
+					const unitCount = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
+					loadCard('card-1', 'Product Count', productCount);
+					loadCard('card-2', 'Total Stock', unitCount);
+				} catch (e) {
+					loadCard('card-1', 'Product Count', '—');
+					loadCard('card-2', 'Total Stock', '—');
+				}
+			}
+			updateProductAndUnitCountCards();
+
+			// Update low stock card
+			async function updateLowStockCard() {
+				try {
+					const resp = await fetch('/stock-intake/data/low-stock/count');
+					const data = await resp.json();
+					const cardClass = data.count > 0 ? 'danger' : 'success';
+					loadCard('card-4', 'Low Stock Items', data.count, cardClass);
+				} catch (e) {
+					loadCard('card-4', 'Low Stock Items', '—');
+				}
+			}
+			updateLowStockCard();
+
+			// Notification system
+			function showNotification(message, type = 'info') {
+				const notificationArea = document.getElementById('notification-area');
+				const alertClass = type === 'warning' ? 'alert-warning' : type === 'danger' ? 'alert-danger' : 'alert-info';
+				
+				const notification = document.createElement('div');
+				notification.className = `alert ${alertClass} alert-dismissible fade show`;
+				notification.innerHTML = `
+					${message}
+					<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+				`;
+				
+				notificationArea.appendChild(notification);
+				
+				// Auto-remove after 5 seconds
+				setTimeout(() => {
+					if (notification.parentNode) {
+						notification.classList.remove('show');
+						setTimeout(() => notification.remove(), 150);
+					}
+				}, 5000);
+			}
+
 			loadCard('card-3', 'Pending Orders', '—');
 
-			// Load recent products from /products (rendered HTML) as a quick demo
+			// Load recent products from /products/data API endpoint
 			async function loadRecent() {
-				const resp = await fetch('/products');
-				const text = await resp.text();
-				// updated: find the products list from returned HTML with class selector
-				const match = text.match(/<ul class="product-list">[\s\S]*?<\/ul>/);
-				document.getElementById('recent-products').innerHTML = match ? match[0] : 'No data';
+				const resp = await fetch('/products/data');
+				const products = await resp.json();
+				if (!products.length) {
+					document.getElementById('recent-products').innerHTML = '<div class="no-products">No products found</div>';
+					return;
+				}
+				let table = `<table><thead><tr><th>Name</th><th>SKU</th><th>Quantity</th><th>Weight (kg)</th></tr></thead><tbody>`;
+				for (const p of products) {
+					table += `<tr><td><a href="/products/${p._id}" class="product-name">${p.name}</a></td><td>${p.sku}</td><td>${p.quantity}</td><td>${p.weight != null ? p.weight : 0}</td></tr>`;
+				}
+				table += '</tbody></table>';
+				document.getElementById('recent-products').innerHTML = table;
 			}
 			loadRecent();
 
@@ -103,12 +177,35 @@
 
       const socket = io();
       socket.on('productCreated', function(product) {
-        updateTotalProductsCard();
+        updateProductAndUnitCountCards();
+        updateLowStockCard();
         loadRecent();
       });
       socket.on('productDeleted', function(data) {
-        updateTotalProductsCard();
+        updateProductAndUnitCountCards();
+        updateLowStockCard();
         loadRecent();
+      });
+      socket.on('stockIntakeCreated', function(intake) {
+        updateProductAndUnitCountCards();
+        updateLowStockCard();
+        loadRecent();
+      });
+      socket.on('lowStockAlert', function(data) {
+        console.log('Received lowStockAlert event:', data);
+        // Update low stock card directly with WebSocket data
+        const cardClass = data.count > 0 ? 'danger' : 'success';
+        loadCard('card-4', 'Low Stock Items', data.count, cardClass);
+        
+        // Show notification for low stock
+        if (data.count > 0) {
+          showNotification(`Low Stock Alert: ${data.count} product(s) below threshold!`, 'warning');
+        }
+      });
+      socket.on('lowStockNotification', function(data) {
+        console.log('Received lowStockNotification event:', data);
+        // Show specific product low stock notification
+        showNotification(data.message, 'danger');
       });
       socket.on('userCount', function(count) {
         document.getElementById('live-user-count').textContent = count;
@@ -116,38 +213,36 @@
 		</script>
 
 			<style>
-				.recent-products-list ul.product-list {
-					list-style: none;
-					padding: 0;
-					margin: 0;
+				.recent-products-table table {
+					width: 100%;
+					border-collapse: collapse;
+					background: #fff;
+					box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+					border-radius: 8px;
+					overflow: hidden;
 				}
-				.recent-products-list ul.product-list li {
+				.recent-products-table th, .recent-products-table td {
+					padding: 12px 16px;
+					text-align: left;
+					border-bottom: 1px solid #e2e8f0;
+				}
+				.recent-products-table th {
 					background: #f1f5f9;
-					margin-bottom: 12px;
-					padding: 16px;
-					border-radius: 6px;
-					display: flex;
-					justify-content: space-between;
-					align-items: center;
-					box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-				}
-				.recent-products-list .product-info {
-					flex: 1;
-				}
-				.recent-products-list .product-name {
-					font-weight: 500;
 					color: #2563eb;
+					font-weight: 600;
+				}
+				.recent-products-table tr:last-child td {
+					border-bottom: none;
+				}
+				.recent-products-table .product-name {
+					color: #2563eb;
+					font-weight: 500;
 					text-decoration: none;
 				}
-				.recent-products-list .product-meta {
-					color: #64748b;
-					font-size: 14px;
-					margin-top: 4px;
-				}
-				.recent-products-list .no-products {
+				.recent-products-table .no-products {
 					text-align: center;
 					color: #64748b;
-					margin-top: 32px;
+					padding: 24px;
 				}
 			</style>
 	</body>

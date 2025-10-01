@@ -116,4 +116,9 @@ router.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
 });
 
+// Chatroom page
+router.get('/chat', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'chat.html'));
+});
+
 module.exports = router;
