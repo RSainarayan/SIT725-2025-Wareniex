@@ -64,3 +64,21 @@ exports.delete = async (req, res) => {
   req.app.get('io').emit('productDeleted', { _id: req.params.id });
   res.redirect('/dashboard.html');
 };
+
+exports.pageEdit = async (req, res) => {
+  const product = await Product.findById(req.params.id).lean();
+  if (!product) return res.status(404).send('Product not found');
+  res.render('products/edit', { product });
+};
+
+exports.edit = async (req, res) => {
+  let { name, sku, quantity, location, weight } = req.body;
+  weight = weight === '' || weight === undefined ? null : parseFloat(weight);
+  try {
+    await Product.findByIdAndUpdate(req.params.id, { name, sku, quantity, location, weight });
+    req.app.get('io').emit('productUpdated', { _id: req.params.id, name, sku, quantity, location, weight });
+    res.redirect(`/products/${req.params.id}`);
+  } catch (err) {
+    res.status(400).send('Error updating product: ' + err.message);
+  }
+};
