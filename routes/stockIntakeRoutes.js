@@ -4,21 +4,34 @@ const ctrl = require('../controllers/stockIntakeController');
 const bwipjs = require('bwip-js');
 const PDFDocument = require('pdfkit');
 
-router.get('/', ctrl.pageIndex);
-router.get('/new', ctrl.pageNew);
-router.get('/:id/edit', ctrl.pageEdit);
-router.post('/', ctrl.create);
-router.put('/:id', ctrl.update);
-router.post('/:id/update', ctrl.update); // Alternative POST route for form compatibility
-router.post('/:id/delete', ctrl.delete);
+// Authentication middleware
+function ensureAuth(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  res.redirect('/login');
+}
 
-// API
-router.get('/data', ctrl.apiIndex);
-router.get('/data/:id', ctrl.apiShow);
-router.put('/data/:id', ctrl.apiUpdate);
+// API Authentication middleware
+function ensureAuthAPI(req, res, next) {
+  if (req.isAuthenticated && req.isAuthenticated()) return next();
+  res.status(401).json({});
+}
+
+// Web routes (require authentication)
+router.get('/', ensureAuth, ctrl.pageIndex);
+router.get('/new', ensureAuth, ctrl.pageNew);
+router.get('/:id/edit', ensureAuth, ctrl.pageEdit);
+router.post('/', ensureAuth, ctrl.create);
+router.put('/:id', ensureAuth, ctrl.update);
+router.post('/:id/update', ensureAuth, ctrl.update); // Alternative POST route for form compatibility
+router.post('/:id/delete', ensureAuth, ctrl.delete);
+
+// API routes (require authentication)
+router.get('/data', ensureAuthAPI, ctrl.apiIndex);
+router.get('/data/:id', ensureAuthAPI, ctrl.apiShow);
+router.put('/data/:id', ensureAuthAPI, ctrl.apiUpdate);
 
 // Barcode image route for stock intake
-router.get('/:id/barcode', async (req, res) => {
+router.get('/:id/barcode', ensureAuth, async (req, res) => {
   try {
     const intake = await ctrl.apiShowRaw(req, res, true); // get raw intake
     if (!intake || !intake._id) return; // already handled
@@ -41,7 +54,7 @@ router.get('/:id/barcode', async (req, res) => {
 });
 
 // Export stock intake as PDF
-router.get('/export/pdf', async (req, res) => {
+router.get('/export/pdf', ensureAuth, async (req, res) => {
   try {
     const intakes = await ctrl.apiIndexRaw(req, res, true); // get all intakes
     // Generate all barcode images first
