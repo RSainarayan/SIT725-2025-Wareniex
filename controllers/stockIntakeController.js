@@ -64,6 +64,21 @@ exports.apiShow = async (req, res) => {
   res.json(intake);
 };
 
+// Helper to get raw intake for barcode
+exports.apiShowRaw = async (req, res, suppressResponse) => {
+  const intake = await StockIntake.findById(req.params.id).populate('product').lean();
+  if (!intake && !suppressResponse) return res.status(404).json({ error: 'Not found' });
+  if (suppressResponse) return intake;
+  res.json(intake);
+};
+
+// Helper to get all intakes for PDF
+exports.apiIndexRaw = async (req, res, suppressResponse) => {
+  const intakes = await StockIntake.find().populate('product').sort({ createdAt: -1 }).lean();
+  if (suppressResponse) return intakes;
+  res.json(intakes);
+};
+
 // Delete intake
 exports.delete = async (req, res) => {
   await StockIntake.findByIdAndDelete(req.params.id);
