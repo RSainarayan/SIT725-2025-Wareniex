@@ -12,7 +12,8 @@
         <h1 class="h3">Stock Intake</h1>
         <div>
           <a href="/dashboard" class="btn btn-outline-secondary me-2">Home</a>
-          <a href="/stock-intake/new" class="btn btn-primary">New intake</a>
+          <a href="/stock-intake/new" class="btn btn-primary me-2">New intake</a>
+          <a href="/stock-intake/export/pdf" class="btn btn-warning me-2">Download PDF</a>
         </div>
       </div>
 
@@ -26,7 +27,7 @@
                 <th>Total Weight (kg)</th>
                 <th>Unit Weight (kg)</th>
                 <th>Received At</th>
-                <th>Actions</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -37,6 +38,9 @@
                   <td><%= i.totalWeight %></td>
                   <td><%= i.singleWeight %></td>
                   <td><%= new Date(i.receivedAt).toLocaleString() %></td>
+                  <td>
+                    <img src="/stock-intake/<%= i._id %>/barcode" alt="Barcode" style="height:40px;" />
+                  </td>
                   <td>
                     <div class="btn-group" role="group">
                       <a href="/stock-intake/<%= i._id %>/edit" class="btn btn-sm btn-outline-primary">Edit</a>

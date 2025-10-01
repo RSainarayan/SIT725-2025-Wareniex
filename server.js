@@ -16,6 +16,12 @@ let liveUserCount = 0;
 io.on('connection', (socket) => {
   liveUserCount++;
   io.emit('userCount', liveUserCount);
+
+  // Chatroom logic
+  socket.on('chat message', (msg) => {
+    io.emit('chat message', msg); // broadcast to all
+  });
+
   socket.on('disconnect', () => {
     liveUserCount--;
     io.emit('userCount', liveUserCount);
