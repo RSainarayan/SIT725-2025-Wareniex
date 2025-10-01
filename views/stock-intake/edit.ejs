@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Edit Stock Intake</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="" crossorigin="anonymous">
+  </head>
+  <body>
+    <div class="container py-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h3">Edit Stock Intake</h1>
+        <div>
+          <a href="/stock-intake" class="btn btn-outline-secondary">Back to List</a>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6">
+          <form action="/stock-intake/<%= intake._id %>/update" method="post">
+            <div class="mb-3">
+              <label for="product" class="form-label">Product</label>
+              <select class="form-select" id="product" name="product" required>
+                <option value="">Select product</option>
+                <% products.forEach(function(p) { %>
+                  <option value="<%= p._id %>" data-weight="<%= p.weight %>" 
+                    <%= intake.product && intake.product._id.toString() === p._id.toString() ? 'selected' : '' %>>
+                    <%= p.name %> (<%= p.weight %>kg per unit)
+                  </option>
+                <% }) %>
+              </select>
+            </div>
+
+            <div class="mb-3">
+              <label for="totalWeight" class="form-label">Total Weight (kg)</label>
+              <input type="number" step="0.01" class="form-control" id="totalWeight" name="totalWeight" 
+                value="<%= intake.totalWeight %>" required>
+            </div>
+
+            <div class="mb-3">
+              <label for="receivedBy" class="form-label">Received By</label>
+              <input type="text" class="form-control" id="receivedBy" name="receivedBy" 
+                value="<%= intake.receivedBy || '' %>">
+            </div>
+
+            <div class="mb-3">
+              <div class="alert alert-info">
+                <strong>Current Quantity:</strong> <span id="currentQuantity"><%= intake.quantity %></span> units<br>
+                <strong>Calculated Quantity:</strong> <span id="calculatedQuantity"><%= intake.quantity %></span> units
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Update Stock Intake</button>
+            <a href="/stock-intake" class="btn btn-secondary">Cancel</a>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="" crossorigin="anonymous"></script>
+    <script>
+      const productSelect = document.getElementById('product');
+      const totalWeightInput = document.getElementById('totalWeight');
+      const calculatedQuantitySpan = document.getElementById('calculatedQuantity');
+
+      function updateCalculatedQuantity() {
+        const selectedOption = productSelect.options[productSelect.selectedIndex];
+        const weight = selectedOption.getAttribute('data-weight');
+        const totalWeight = parseFloat(totalWeightInput.value) || 0;
+        
+        if (weight && totalWeight > 0) {
+          const calculatedQty = Math.floor(totalWeight / parseFloat(weight));
+          calculatedQuantitySpan.textContent = calculatedQty;
+        } else {
+          calculatedQuantitySpan.textContent = '0';
+        }
+      }
+
+      productSelect.addEventListener('change', updateCalculatedQuantity);
+      totalWeightInput.addEventListener('input', updateCalculatedQuantity);
+
+      // Initial calculation
+      updateCalculatedQuantity();
+    </script>
+  </body>
+</html>

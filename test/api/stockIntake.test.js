@@ -430,6 +430,231 @@ describe('Stock Intake API Endpoints', () => {
     });
   });
 
+  describe('PUT /stock-intake/data/:id', () => {
+    it('should update stock intake and adjust product stock correctly', async () => {
+      // Create initial stock intake
+      const initialIntake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Initial intake'
+      });
+
+      // Create another product for update test
+      const newProduct = await createTestProduct({
+        name: 'New Test Product',
+        code: 'NTP001',
+        price: 75.00,
+        stockQuantity: 50,
+        stockWeight: 500.00
+      });
+
+      const updateData = {
+        productId: newProduct._id.toString(),
+        quantity: 30,
+        weight: 300.00,
+        notes: 'Updated intake'
+      };
+
+      const response = await chai.request(app)
+        .put(`/stock-intake/data/${initialIntake._id}`)
+        .set('Cookie', userCookie)
+        .send(updateData);
+
+      expect(response.status).to.equal(200);
+      expect(response.body).to.have.property('productId', newProduct._id.toString());
+      expect(response.body).to.have.property('quantity', 30);
+      expect(response.body).to.have.property('weight', 300.00);
+      expect(response.body).to.have.property('notes', 'Updated intake');
+
+      // Verify original product stock was reverted
+      const originalProduct = await Product.findById(testProduct._id);
+      expect(originalProduct.stockQuantity).to.equal(80); // 100 - 20 (reverted)
+      expect(originalProduct.stockWeight).to.equal(800.00); // 1000.00 - 200.00 (reverted)
+
+      // Verify new product stock was updated
+      const updatedNewProduct = await Product.findById(newProduct._id);
+      expect(updatedNewProduct.stockQuantity).to.equal(80); // 50 + 30
+      expect(updatedNewProduct.stockWeight).to.equal(800.00); // 500.00 + 300.00
+    });
+
+    it('should update stock intake for same product correctly', async () => {
+      // Create initial stock intake
+      const initialIntake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 15,
+        weight: 150.00,
+        notes: 'Initial intake'
+      });
+
+      const updateData = {
+        productId: testProduct._id.toString(),
+        quantity: 25,
+        weight: 250.00,
+        notes: 'Updated intake same product'
+      };
+
+      const response = await chai.request(app)
+        .put(`/stock-intake/data/${initialIntake._id}`)
+        .set('Cookie', userCookie)
+        .send(updateData);
+
+      expect(response.status).to.equal(200);
+      expect(response.body.quantity).to.equal(25);
+      expect(response.body.weight).to.equal(250.00);
+      expect(response.body.notes).to.equal('Updated intake same product');
+
+      // Verify product stock reflects the change
+      const updatedProduct = await Product.findById(testProduct._id);
+      expect(updatedProduct.stockQuantity).to.equal(110); // 100 - 15 + 25
+      expect(updatedProduct.stockWeight).to.equal(1100.00); // 1000.00 - 150.00 + 250.00
+    });
+
+    it('should return 404 for non-existent stock intake', async () => {
+      const nonExistentId = '507f1f77bcf86cd799439011';
+      
+      const updateData = {
+        productId: testProduct._id.toString(),
+        quantity: 25,
+        weight: 250.00,
+        notes: 'Update non-existent'
+      };
+
+      const response = await chai.request(app)
+        .put(`/stock-intake/data/${nonExistentId}`)
+        .set('Cookie', userCookie)
+        .send(updateData);
+
+      expect(response.status).to.equal(404);
+      expect(response.body).to.have.property('error');
+      expect(response.body.error).to.include('Stock intake not found');
+    });
+
+    it('should return 400 for invalid update data', async () => {
+      const initialIntake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Initial intake'
+      });
+
+      const updateData = {
+        productId: 'invalid-id',
+        quantity: 25,
+        weight: 250.00,
+        notes: 'Invalid product ID'
+      };
+
+      const response = await chai.request(app)
+        .put(`/stock-intake/data/${initialIntake._id}`)
+        .set('Cookie', userCookie)
+        .send(updateData);
+
+      expect(response.status).to.equal(400);
+      expect(response.body).to.have.property('error');
+    });
+
+    it('should require authentication', async () => {
+      const initialIntake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Initial intake'
+      });
+
+      const updateData = {
+        productId: testProduct._id.toString(),
+        quantity: 25,
+        weight: 250.00,
+        notes: 'Unauthenticated update'
+      };
+
+      const response = await chai.request(app)
+        .put(`/stock-intake/data/${initialIntake._id}`)
+        .send(updateData);
+
+      expect(response.status).to.equal(401);
+      expect(response.body).to.deep.equal({});
+    });
+  });
+
+  describe('GET /stock-intake/:id/edit', () => {
+    it('should render edit form with current intake data', async () => {
+      const intake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Test intake'
+      });
+
+      const response = await chai.request(app)
+        .get(`/stock-intake/${intake._id}/edit`)
+        .set('Cookie', userCookie);
+
+      expect(response.status).to.equal(200);
+      expect(response.text).to.include('Edit Stock Intake');
+      expect(response.text).to.include('Test intake');
+    });
+
+    it('should return 404 for non-existent intake', async () => {
+      const nonExistentId = '507f1f77bcf86cd799439011';
+
+      const response = await chai.request(app)
+        .get(`/stock-intake/${nonExistentId}/edit`)
+        .set('Cookie', userCookie);
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should require authentication', async () => {
+      const intake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Test intake'
+      });
+
+      const response = await chai.request(app)
+        .get(`/stock-intake/${intake._id}/edit`)
+        .redirects(0);
+
+      expect(response.status).to.equal(302);
+      expect(response.headers.location).to.equal('/login');
+    });
+  });
+
+  describe('POST /stock-intake/:id/update', () => {
+    it('should update stock intake via POST and redirect', async () => {
+      const initialIntake = await createTestStockIntake({
+        productId: testProduct._id,
+        quantity: 20,
+        weight: 200.00,
+        notes: 'Initial intake'
+      });
+
+      const updateData = {
+        productId: testProduct._id.toString(),
+        quantity: 30,
+        weight: 300.00,
+        notes: 'Updated via POST'
+      };
+
+      const response = await chai.request(app)
+        .post(`/stock-intake/${initialIntake._id}/update`)
+        .set('Cookie', userCookie)
+        .send(updateData);
+
+      expect(response.status).to.equal(302);
+      expect(response.headers.location).to.equal('/stock-intake');
+
+      // Verify the update was applied
+      const updatedIntake = await StockIntake.findById(initialIntake._id);
+      expect(updatedIntake.quantity).to.equal(30);
+      expect(updatedIntake.weight).to.equal(300.00);
+      expect(updatedIntake.notes).to.equal('Updated via POST');
+    });
+  });
+
   describe('Stock Intake Business Logic', () => {
     it('should correctly calculate running totals with multiple intakes', async () => {
       // Create multiple intakes for the same product
