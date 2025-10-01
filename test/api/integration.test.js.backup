@@ -1,0 +1,332 @@
+require('../helpers/setup');
+const { connectTestDB, disconnectTestDB } = require('../helpers/database');
+const app = require('../../server');
+const Product = require('../../models/Product');
+const StockIntake = require('../../models/StockIntake');
+const User = require('../../models/User');
+const { 
+  createTestUser, 
+  createTestAdmin, 
+  authenticateUser, 
+  cleanupTestData 
+} = require('../helpers/testUtils');
+
+describe('Integration Tests - Complete Application Flow', () => {
+  
+  before(async function() {
+    this.timeout(30000);
+    await connectTestDB();
+  });
+
+  after(async function() {
+    this.timeout(30000);
+    await disconnectTestDB();
+  });
+  
+  beforeEach(async () => {
+    await cleanupTestData();
+  });
+
+  describe('Complete Warehouse Management Flow', () => {
+    it('should handle complete product and stock intake workflow', async () => {
+      // 1. Create admin user and authenticate
+      const admin = await createTestAdmin({
+        email: 'admin@warehouse.com',
+        password: 'admin123'
+      });
+      
+      const adminCookie = await authenticateUser(app, {
+        email: 'admin@warehouse.com',
+        password: 'admin123'
+      });
+
+      // 2. Create a product via API
+      const productData = {
+        name: 'Widget A',
+        sku: 'WGT-001',
+        quantity: 0,
+        location: 'Warehouse Section A',
+        weight: 1.5
+      };
+
+      await request(app)
+        .post('/products')
+        .send(productData)
+        .expect(302);
+
+      // 3. Verify product was created
+      let product = await Product.findOne({ sku: 'WGT-001' });
+      expect(product).to.not.be.null;
+      expect(product.quantity).to.equal(0);
+
+      // 4. Check total quantity (should be 0)
+      let totalResponse = await request(app)
+        .get('/products/data/total-quantity')
+        .expect(200);
+      expect(totalResponse.body.totalQuantity).to.equal(0);
+
+      // 5. Create stock intake to add inventory
+      const intakeData = {
+        product: product._id.toString(),
+        totalWeight: 30.0, // Should result in 20 units (30 / 1.5)
+        receivedBy: 'warehouse@example.com'
+      };
+
+      await request(app)
+        .post('/stock-intake')
+        .send(intakeData)
+        .expect(302);
+
+      // 6. Verify stock intake was created and product quantity updated
+      const intake = await StockIntake.findOne({ product: product._id });
+      expect(intake).to.not.be.null;
+      expect(intake.quantity).to.equal(20);
+      expect(intake.totalWeight).to.equal(30.0);
+
+      product = await Product.findById(product._id);
+      expect(product.quantity).to.equal(20);
+
+      // 7. Check updated total quantity
+      totalResponse = await request(app)
+        .get('/products/data/total-quantity')
+        .expect(200);
+      expect(totalResponse.body.totalQuantity).to.equal(20);
+
+      // 8. Get product via API to verify all data
+      const productResponse = await request(app)
+        .get(`/products/data/${product._id}`)
+        .expect(200);
+
+      expect(productResponse.body.name).to.equal('Widget A');
+      expect(productResponse.body.quantity).to.equal(20);
+
+      // 9. Create another stock intake
+      const secondIntakeData = {
+        product: product._id.toString(),
+        totalWeight: 15.0, // Should add 10 more units (15 / 1.5)
+        receivedBy: 'warehouse@example.com'
+      };
+
+      await request(app)
+        .post('/stock-intake')
+        .send(secondIntakeData)
+        .expect(302);
+
+      // 10. Verify final quantities
+      product = await Product.findById(product._id);
+      expect(product.quantity).to.equal(30); // 20 + 10
+
+      totalResponse = await request(app)
+        .get('/products/data/total-quantity')
+        .expect(200);
+      expect(totalResponse.body.totalQuantity).to.equal(30);
+
+      // 11. Verify stock intake history
+      const intakeHistoryResponse = await request(app)
+        .get('/stock-intake/data')
+        .expect(200);
+
+      expect(intakeHistoryResponse.body).to.have.length(2);
+      intakeHistoryResponse.body.forEach(intake => {
+        expect(intake.product.name).to.equal('Widget A');
+        expect(intake.receivedBy).to.equal('warehouse@example.com');
+      });
+    });
+
+    it('should handle user management workflow', async () => {
+      // 1. Create admin
+      const admin = await createTestAdmin();
+      const adminCookie = await authenticateUser(app, {
+        email: 'admin@example.com',
+        password: 'admin123'
+      });
+
+      // 2. Admin creates a new user
+      const newUserData = {
+        email: 'newuser@warehouse.com',
+        password: 'userpass123',
+        role: 'user'
+      };
+
+      const createUserResponse = await request(app)
+        .post('/admin/users')
+        .set('Cookie', adminCookie)
+        .send(newUserData)
+        .expect(201);
+
+      expect(createUserResponse.body.email).to.equal('newuser@warehouse.com');
+      expect(createUserResponse.body.role).to.equal('user');
+
+      // 3. New user can login
+      const userLoginResponse = await request(app)
+        .post('/login')
+        .send({
+          email: 'newuser@warehouse.com',
+          password: 'userpass123'
+        })
+        .expect(302);
+
+      expect(userLoginResponse.headers.location).to.equal('/dashboard');
+
+      // 4. Admin can list all users
+      const usersResponse = await request(app)
+        .get('/admin/users')
+        .set('Cookie', adminCookie)
+        .expect(200);
+
+      expect(usersResponse.body).to.have.length(2); // admin + new user
+      
+      // 5. Admin can update user role
+      const userId = createUserResponse.body.id;
+      const updateResponse = await request(app)
+        .put(`/admin/users/${userId}`)
+        .set('Cookie', adminCookie)
+        .send({ role: 'admin' })
+        .expect(200);
+
+      expect(updateResponse.body.role).to.equal('admin');
+
+      // 6. Admin can delete user
+      await request(app)
+        .delete(`/admin/users/${userId}`)
+        .set('Cookie', adminCookie)
+        .expect(200);
+
+      // 7. Verify user was deleted
+      const updatedUsersResponse = await request(app)
+        .get('/admin/users')
+        .set('Cookie', adminCookie)
+        .expect(200);
+
+      expect(updatedUsersResponse.body).to.have.length(1); // only admin remains
+    });
+
+    it('should handle authentication flow correctly', async () => {
+      // 1. Unauthenticated access should redirect to login
+      await request(app)
+        .get('/dashboard')
+        .expect(302)
+        .expect('Location', '/login');
+
+      // 2. Registration should work
+      const userData = {
+        email: 'testuser@example.com',
+        password: 'testpass123'
+      };
+
+      await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(302)
+        .expect('Location', '/login');
+
+      // 3. Login should work
+      const loginResponse = await request(app)
+        .post('/login')
+        .send(userData)
+        .expect(302)
+        .expect('Location', '/dashboard');
+
+      const cookie = loginResponse.headers['set-cookie'];
+
+      // 4. Authenticated access should work
+      await request(app)
+        .get('/dashboard')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      // 5. User info endpoint should work
+      const meResponse = await request(app)
+        .get('/me')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      expect(meResponse.body.email).to.equal('testuser@example.com');
+      expect(meResponse.body.role).to.equal('user');
+
+      // 6. Logout should work
+      await request(app)
+        .get('/logout')
+        .set('Cookie', cookie)
+        .expect(302)
+        .expect('Location', '/login');
+
+      // 7. After logout, dashboard should be inaccessible
+      await request(app)
+        .get('/dashboard')
+        .set('Cookie', cookie)
+        .expect(302)
+        .expect('Location', '/login');
+    });
+
+    it('should handle multiple products and complex calculations', async () => {
+      // Create multiple products with different weights
+      const products = [
+        { name: 'Light Item', sku: 'LIGHT-001', weight: 0.5, quantity: 0, location: 'Shelf A' },
+        { name: 'Medium Item', sku: 'MED-001', weight: 2.0, quantity: 5, location: 'Shelf B' },
+        { name: 'Heavy Item', sku: 'HEAVY-001', weight: 10.0, quantity: 10, location: 'Floor C' }
+      ];
+
+      const createdProducts = [];
+      for (const productData of products) {
+        await request(app)
+          .post('/products')
+          .send(productData)
+          .expect(302);
+        
+        const product = await Product.findOne({ sku: productData.sku });
+        createdProducts.push(product);
+      }
+
+      // Initial total quantity should be 15 (0 + 5 + 10)
+      let totalResponse = await request(app)
+        .get('/products/data/total-quantity')
+        .expect(200);
+      expect(totalResponse.body.totalQuantity).to.equal(15);
+
+      // Add stock intake for light item
+      await request(app)
+        .post('/stock-intake')
+        .send({
+          product: createdProducts[0]._id.toString(),
+          totalWeight: 5.0, // 10 units (5.0 / 0.5)
+          receivedBy: 'worker1@example.com'
+        })
+        .expect(302);
+
+      // Add stock intake for heavy item
+      await request(app)
+        .post('/stock-intake')
+        .send({
+          product: createdProducts[2]._id.toString(),
+          totalWeight: 35.0, // 3 units (35.0 / 10.0)
+          receivedBy: 'worker2@example.com'
+        })
+        .expect(302);
+
+      // Total should now be 28 (10 + 5 + 13)
+      totalResponse = await request(app)
+        .get('/products/data/total-quantity')
+        .expect(200);
+      expect(totalResponse.body.totalQuantity).to.equal(28);
+
+      // Verify individual product quantities
+      const lightProduct = await Product.findById(createdProducts[0]._id);
+      const mediumProduct = await Product.findById(createdProducts[1]._id);
+      const heavyProduct = await Product.findById(createdProducts[2]._id);
+
+      expect(lightProduct.quantity).to.equal(10);
+      expect(mediumProduct.quantity).to.equal(5); // unchanged
+      expect(heavyProduct.quantity).to.equal(13); // 10 + 3
+
+      // Check stock intake history
+      const intakeResponse = await request(app)
+        .get('/stock-intake/data')
+        .expect(200);
+
+      expect(intakeResponse.body).to.have.length(2);
+      expect(intakeResponse.body.some(intake => intake.product.name === 'Light Item')).to.be.true;
+      expect(intakeResponse.body.some(intake => intake.product.name === 'Heavy Item')).to.be.true;
+    });
+  });
+});
