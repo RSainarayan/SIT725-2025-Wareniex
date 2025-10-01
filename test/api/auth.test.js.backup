@@ -1,0 +1,523 @@
+require('../helpers/setup');
+const { connectTestDB, disconnectTestDB } = require('../helpers/database');
+const app = require('../../server');
+const User = require('../../models/User');
+const bcrypt = require('bcryptjs');
+const { 
+  createTestUser, 
+  createTestAdmin, 
+  authenticateUser, 
+  cleanupTestData 
+} = require('../helpers/testUtils');
+
+describe('Authentication & User Management API Endpoints', () => {
+  
+  before(async function() {
+    this.timeout(30000);
+    await connectTestDB();
+  });
+
+  after(async function() {
+    this.timeout(30000);
+    await disconnectTestDB();
+  });
+  
+  beforeEach(async () => {
+    await cleanupTestData();
+  });
+
+  describe('POST /login', () => {
+    it('should login successfully with valid credentials', async () => {
+      await createTestUser({
+        email: 'login@example.com',
+        password: 'password123'
+      });
+
+      const response = await chai.request(app)
+        .post('/login')
+        .redirects(0) // Don't follow redirects
+        .send({
+          email: 'login@example.com',
+          password: 'password123'
+        });
+
+      expect(response.status).to.equal(302); // Redirect to dashboard
+      expect(response.headers.location).to.equal('/dashboard');
+      expect(response.headers['set-cookie']).to.exist;
+    });
+
+    it('should fail login with invalid email', async () => {
+      await createTestUser({
+        email: 'valid@example.com',
+        password: 'password123'
+      });
+
+      const response = await request(app)
+        .post('/login')
+        .send({
+          email: 'invalid@example.com',
+          password: 'password123'
+        })
+        .expect(302); // Redirect back to login
+
+      expect(response.headers.location).to.equal('/login');
+    });
+
+    it('should fail login with invalid password', async () => {
+      await createTestUser({
+        email: 'test@example.com',
+        password: 'correctpassword'
+      });
+
+      const response = await request(app)
+        .post('/login')
+        .send({
+          email: 'test@example.com',
+          password: 'wrongpassword'
+        })
+        .expect(302); // Redirect back to login
+
+      expect(response.headers.location).to.equal('/login');
+    });
+
+    it('should fail login with missing credentials', async () => {
+      const response = await request(app)
+        .post('/login')
+        .send({})
+        .expect(302);
+
+      expect(response.headers.location).to.equal('/login');
+    });
+  });
+
+  describe('GET /login', () => {
+    it('should render login page', async () => {
+      const response = await request(app)
+        .get('/login')
+        .expect(200);
+
+      expect(response.text).to.include('login');
+    });
+  });
+
+  describe('GET /logout', () => {
+    it('should logout user and redirect to login', async () => {
+      // First login
+      const cookie = await authenticateUser(app);
+
+      // Then logout
+      const response = await request(app)
+        .get('/logout')
+        .set('Cookie', cookie)
+        .expect(302);
+
+      expect(response.headers.location).to.equal('/login');
+    });
+
+    it('should work even when user is not logged in', async () => {
+      const response = await request(app)
+        .get('/logout')
+        .expect(302);
+
+      expect(response.headers.location).to.equal('/login');
+    });
+  });
+
+  describe('GET /dashboard', () => {
+    it('should allow access to authenticated users', async () => {
+      const cookie = await authenticateUser(app);
+
+      const response = await request(app)
+        .get('/dashboard')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      expect(response.text).to.include('dashboard');
+    });
+
+    it('should redirect unauthenticated users to login', async () => {
+      const response = await request(app)
+        .get('/dashboard')
+        .expect(302);
+
+      expect(response.headers.location).to.equal('/login');
+    });
+  });
+
+  describe('GET /me', () => {
+    it('should return current user info for authenticated users', async () => {
+      const user = await createTestUser({
+        email: 'me@example.com',
+        password: 'password123',
+        role: 'admin'
+      });
+
+      const cookie = await authenticateUser(app, {
+        email: 'me@example.com',
+        password: 'password123'
+      });
+
+      const response = await request(app)
+        .get('/me')
+        .set('Cookie', cookie)
+        .expect(200);
+
+      expect(response.body).to.have.property('email', 'me@example.com');
+      expect(response.body).to.have.property('role', 'admin');
+      expect(response.body).to.have.property('id');
+    });
+
+    it('should return 401 for unauthenticated users', async () => {
+      const response = await request(app)
+        .get('/me')
+        .expect(401);
+
+      expect(response.body).to.deep.equal({});
+    });
+  });
+
+  describe('POST /register', () => {
+    it('should register a new user successfully', async () => {
+      const userData = {
+        email: 'newuser@example.com',
+        password: 'newpassword123',
+        role: 'user'
+      };
+
+      const response = await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(302); // Redirect to login
+
+      expect(response.headers.location).to.equal('/login');
+
+      // Verify user was created in database
+      const createdUser = await User.findOne({ email: 'newuser@example.com' });
+      expect(createdUser).to.not.be.null;
+      expect(createdUser.email).to.equal('newuser@example.com');
+      expect(createdUser.role).to.equal('user');
+      
+      // Verify password was hashed
+      const isPasswordValid = await bcrypt.compare('newpassword123', createdUser.passwordHash);
+      expect(isPasswordValid).to.be.true;
+    });
+
+    it('should register user with default role when role not specified', async () => {
+      const userData = {
+        email: 'defaultrole@example.com',
+        password: 'password123'
+      };
+
+      await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(302);
+
+      const createdUser = await User.findOne({ email: 'defaultrole@example.com' });
+      expect(createdUser.role).to.equal('user');
+    });
+
+    it('should return error for missing email', async () => {
+      const userData = {
+        password: 'password123'
+      };
+
+      const response = await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(400);
+
+      expect(response.text).to.include('Email and password required');
+    });
+
+    it('should return error for missing password', async () => {
+      const userData = {
+        email: 'test@example.com'
+      };
+
+      const response = await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(400);
+
+      expect(response.text).to.include('Email and password required');
+    });
+
+    it('should return error for duplicate email', async () => {
+      await createTestUser({ email: 'duplicate@example.com' });
+
+      const userData = {
+        email: 'duplicate@example.com',
+        password: 'password123'
+      };
+
+      const response = await request(app)
+        .post('/register')
+        .send(userData)
+        .expect(409);
+
+      expect(response.text).to.include('Email already registered');
+    });
+  });
+
+  describe('GET /register', () => {
+    it('should render registration page', async () => {
+      const response = await request(app)
+        .get('/register')
+        .expect(200);
+
+      expect(response.text).to.include('register');
+    });
+  });
+
+  describe('Admin User Management Endpoints', () => {
+    let adminCookie;
+
+    beforeEach(async () => {
+      await createTestAdmin({
+        email: 'admin@example.com',
+        password: 'admin123'
+      });
+      
+      adminCookie = await authenticateUser(app, {
+        email: 'admin@example.com',
+        password: 'admin123'
+      });
+    });
+
+    describe('GET /admin/users', () => {
+      it('should return all users excluding password hashes', async () => {
+        await createTestUser({ email: 'user1@example.com' });
+        await createTestUser({ email: 'user2@example.com' });
+
+        const response = await request(app)
+          .get('/admin/users')
+          .set('Cookie', adminCookie)
+          .expect(200);
+
+        expect(response.body).to.be.an('array');
+        expect(response.body).to.have.length(3); // admin + 2 users
+
+        response.body.forEach(user => {
+          expect(user).to.have.property('email');
+          expect(user).to.have.property('role');
+          expect(user).to.have.property('_id');
+          expect(user).to.not.have.property('passwordHash');
+        });
+      });
+
+      it('should handle database errors gracefully', async () => {
+        // This test would require mocking the database to simulate an error
+        // For now, we'll test the successful case
+        const response = await request(app)
+          .get('/admin/users')
+          .set('Cookie', adminCookie)
+          .expect(200);
+
+        expect(response.body).to.be.an('array');
+      });
+    });
+
+    describe('POST /admin/users', () => {
+      it('should create a new user as admin', async () => {
+        const newUserData = {
+          email: 'adminCreated@example.com',
+          password: 'password123',
+          role: 'user'
+        };
+
+        const response = await request(app)
+          .post('/admin/users')
+          .set('Cookie', adminCookie)
+          .send(newUserData)
+          .expect(201);
+
+        expect(response.body).to.have.property('email', 'adminCreated@example.com');
+        expect(response.body).to.have.property('role', 'user');
+        expect(response.body).to.have.property('id');
+
+        // Verify user was created in database
+        const createdUser = await User.findOne({ email: 'adminCreated@example.com' });
+        expect(createdUser).to.not.be.null;
+      });
+
+      it('should create user with default role when not specified', async () => {
+        const newUserData = {
+          email: 'defaultAdminCreated@example.com',
+          password: 'password123'
+        };
+
+        const response = await request(app)
+          .post('/admin/users')
+          .set('Cookie', adminCookie)
+          .send(newUserData)
+          .expect(201);
+
+        expect(response.body.role).to.equal('user');
+      });
+
+      it('should return error for missing email', async () => {
+        const newUserData = {
+          password: 'password123'
+        };
+
+        const response = await request(app)
+          .post('/admin/users')
+          .set('Cookie', adminCookie)
+          .send(newUserData)
+          .expect(400);
+
+        expect(response.text).to.include('Email and password required');
+      });
+
+      it('should return error for duplicate email', async () => {
+        await createTestUser({ email: 'existing@example.com' });
+
+        const newUserData = {
+          email: 'existing@example.com',
+          password: 'password123'
+        };
+
+        const response = await request(app)
+          .post('/admin/users')
+          .set('Cookie', adminCookie)
+          .send(newUserData)
+          .expect(409);
+
+        expect(response.text).to.include('Email already registered');
+      });
+    });
+
+    describe('PUT /admin/users/:id', () => {
+      it('should update user email and role', async () => {
+        const user = await createTestUser({
+          email: 'updateme@example.com',
+          role: 'user'
+        });
+
+        const updateData = {
+          email: 'updated@example.com',
+          role: 'admin'
+        };
+
+        const response = await request(app)
+          .put(`/admin/users/${user._id}`)
+          .set('Cookie', adminCookie)
+          .send(updateData)
+          .expect(200);
+
+        expect(response.body).to.have.property('email', 'updated@example.com');
+        expect(response.body).to.have.property('role', 'admin');
+
+        // Verify user was updated in database
+        const updatedUser = await User.findById(user._id);
+        expect(updatedUser.email).to.equal('updated@example.com');
+        expect(updatedUser.role).to.equal('admin');
+      });
+
+      it('should update only email when role not provided', async () => {
+        const user = await createTestUser({
+          email: 'emailonly@example.com',
+          role: 'user'
+        });
+
+        const updateData = {
+          email: 'newemail@example.com'
+        };
+
+        const response = await request(app)
+          .put(`/admin/users/${user._id}`)
+          .set('Cookie', adminCookie)
+          .send(updateData)
+          .expect(200);
+
+        expect(response.body.email).to.equal('newemail@example.com');
+        expect(response.body.role).to.equal('user'); // Should remain unchanged
+      });
+
+      it('should return error when neither email nor role provided', async () => {
+        const user = await createTestUser();
+
+        const response = await request(app)
+          .put(`/admin/users/${user._id}`)
+          .set('Cookie', adminCookie)
+          .send({})
+          .expect(400);
+
+        expect(response.body.error).to.include('Email or role required');
+      });
+
+      it('should return 404 for non-existent user', async () => {
+        const nonExistentId = '507f1f77bcf86cd799439011';
+
+        const response = await request(app)
+          .put(`/admin/users/${nonExistentId}`)
+          .set('Cookie', adminCookie)
+          .send({ email: 'test@example.com' })
+          .expect(404);
+
+        expect(response.body.error).to.include('User not found');
+      });
+    });
+
+    describe('DELETE /admin/users/:id', () => {
+      it('should delete a user successfully', async () => {
+        const user = await createTestUser({
+          email: 'deleteme@example.com'
+        });
+
+        const response = await request(app)
+          .delete(`/admin/users/${user._id}`)
+          .set('Cookie', adminCookie)
+          .expect(200);
+
+        expect(response.body.message).to.equal('User deleted');
+
+        // Verify user was deleted from database
+        const deletedUser = await User.findById(user._id);
+        expect(deletedUser).to.be.null;
+      });
+
+      it('should return 404 for non-existent user', async () => {
+        const nonExistentId = '507f1f77bcf86cd799439011';
+
+        const response = await request(app)
+          .delete(`/admin/users/${nonExistentId}`)
+          .set('Cookie', adminCookie)
+          .expect(404);
+
+        expect(response.body.error).to.include('User not found');
+      });
+    });
+
+    describe('GET /admin', () => {
+      it('should render admin dashboard page', async () => {
+        const response = await request(app)
+          .get('/admin')
+          .set('Cookie', adminCookie)
+          .expect(200);
+
+        expect(response.text).to.include('admin');
+      });
+    });
+  });
+
+  describe('Authentication Middleware', () => {
+    it('should protect dashboard route', async () => {
+      const response = await request(app)
+        .get('/dashboard')
+        .expect(302);
+
+      expect(response.headers.location).to.equal('/login');
+    });
+
+    it('should allow authenticated access to dashboard', async () => {
+      const cookie = await authenticateUser(app);
+
+      const response = await request(app)
+        .get('/dashboard')
+        .set('Cookie', cookie)
+        .expect(200);
+    });
+  });
+});

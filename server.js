@@ -52,25 +52,32 @@ app.get('/', (req, res) => res.redirect('/login'));
 
 // Connect to MongoDB (local by default)
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/Wareniex';
-mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => {
-    console.log('Connected to MongoDB');
 
-    // Ensure default admin user exists (email: admin@example.com / password: admin123)
-    const User = require('./models/User');
-    const bcrypt = require('bcryptjs');
-    (async () => {
-      const exists = await User.findOne({ email: 'admin@example.com' });
-      if (!exists) {
-        const hash = await bcrypt.hash('admin123', 10);
-        await User.create({ email: 'admin@example.com', passwordHash: hash });
-        console.log('Created default admin user: admin@example.com / admin123');
-      }
-    })().catch(() => {});
+// Only connect to MongoDB and start server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+    .then(() => {
+      console.log('Connected to MongoDB');
 
-    server.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
-  })
-  .catch(err => {
-    console.error('MongoDB connection error:', err.message);
-    process.exit(1);
-  });
+      // Ensure default admin user exists (email: admin@example.com / password: admin123)
+      const User = require('./models/User');
+      const bcrypt = require('bcryptjs');
+      (async () => {
+        const exists = await User.findOne({ email: 'admin@example.com' });
+        if (!exists) {
+          const hash = await bcrypt.hash('admin123', 10);
+          await User.create({ email: 'admin@example.com', passwordHash: hash });
+          console.log('Created default admin user: admin@example.com / admin123');
+        }
+      })().catch(() => {});
+
+      server.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
+    })
+    .catch(err => {
+      console.error('MongoDB connection error:', err.message);
+      process.exit(1);
+    });
+}
+
+// Export the app for testing
+module.exports = app;
