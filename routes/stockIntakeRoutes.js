@@ -29,6 +29,8 @@ router.post('/:id/delete', ensureAuth, ctrl.delete);
 router.get('/data', ensureAuthAPI, ctrl.apiIndex);
 router.get('/data/:id', ensureAuthAPI, ctrl.apiShow);
 router.put('/data/:id', ensureAuthAPI, ctrl.apiUpdate);
+router.get('/data/low-stock/count', ensureAuthAPI, ctrl.apiLowStockCount);
+router.get('/data/low-stock/products', ensureAuthAPI, ctrl.apiLowStockProducts);
 
 // Barcode image route for stock intake
 router.get('/:id/barcode', ensureAuth, async (req, res) => {

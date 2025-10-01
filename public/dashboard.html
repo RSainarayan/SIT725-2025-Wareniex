@@ -25,12 +25,16 @@
 
 		<div class="container mt-4">
 			<h1 class="mb-3">Dashboard</h1>
+			
+			<!-- Notification area -->
+			<div id="notification-area" class="mb-3"></div>
 
 			<div class="row g-3">
 				<!-- Include dashboard cards component -->
 				<div class="col-md-4" id="card-1"></div>
 				<div class="col-md-4" id="card-2"></div>
 				<div class="col-md-4" id="card-3"></div>
+				<div class="col-md-4" id="card-4"></div>
 				<div class="col-md-4">
 					<div class="card">
 						<div class="card-body text-center">
@@ -61,10 +65,14 @@
 		<!-- Load dashboard component and simple client script -->
 		<script>
 			// fetch and insert component HTML into placeholders
-			async function loadCard(id, title, value) {
+			async function loadCard(id, title, value, cardClass = '') {
 				const resp = await fetch('/components/dashboard/dashboard-card.html');
 				const text = await resp.text();
-				const html = text.replace('{{title}}', title).replace('{{value}}', value);
+				const classAttr = cardClass ? ` border-${cardClass}` : '';
+				const html = text
+					.replace('{{title}}', title)
+					.replace('{{value}}', value)
+					.replace('class="card text-center"', `class="card text-center${classAttr}"`);
 				document.getElementById(id).innerHTML = html;
 			}
 
@@ -95,6 +103,42 @@
 				}
 			}
 			updateProductAndUnitCountCards();
+
+			// Update low stock card
+			async function updateLowStockCard() {
+				try {
+					const resp = await fetch('/stock-intake/data/low-stock/count');
+					const data = await resp.json();
+					const cardClass = data.count > 0 ? 'danger' : 'success';
+					loadCard('card-4', 'Low Stock Items', data.count, cardClass);
+				} catch (e) {
+					loadCard('card-4', 'Low Stock Items', '—');
+				}
+			}
+			updateLowStockCard();
+
+			// Notification system
+			function showNotification(message, type = 'info') {
+				const notificationArea = document.getElementById('notification-area');
+				const alertClass = type === 'warning' ? 'alert-warning' : type === 'danger' ? 'alert-danger' : 'alert-info';
+				
+				const notification = document.createElement('div');
+				notification.className = `alert ${alertClass} alert-dismissible fade show`;
+				notification.innerHTML = `
+					${message}
+					<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+				`;
+				
+				notificationArea.appendChild(notification);
+				
+				// Auto-remove after 5 seconds
+				setTimeout(() => {
+					if (notification.parentNode) {
+						notification.classList.remove('show');
+						setTimeout(() => notification.remove(), 150);
+					}
+				}, 5000);
+			}
 
 			loadCard('card-3', 'Pending Orders', '—');
 
@@ -134,11 +178,34 @@
       const socket = io();
       socket.on('productCreated', function(product) {
         updateProductAndUnitCountCards();
+        updateLowStockCard();
         loadRecent();
       });
       socket.on('productDeleted', function(data) {
         updateProductAndUnitCountCards();
+        updateLowStockCard();
         loadRecent();
+      });
+      socket.on('stockIntakeCreated', function(intake) {
+        updateProductAndUnitCountCards();
+        updateLowStockCard();
+        loadRecent();
+      });
+      socket.on('lowStockAlert', function(data) {
+        console.log('Received lowStockAlert event:', data);
+        // Update low stock card directly with WebSocket data
+        const cardClass = data.count > 0 ? 'danger' : 'success';
+        loadCard('card-4', 'Low Stock Items', data.count, cardClass);
+        
+        // Show notification for low stock
+        if (data.count > 0) {
+          showNotification(`Low Stock Alert: ${data.count} product(s) below threshold!`, 'warning');
+        }
+      });
+      socket.on('lowStockNotification', function(data) {
+        console.log('Received lowStockNotification event:', data);
+        // Show specific product low stock notification
+        showNotification(data.message, 'danger');
       });
       socket.on('userCount', function(count) {
         document.getElementById('live-user-count').textContent = count;
