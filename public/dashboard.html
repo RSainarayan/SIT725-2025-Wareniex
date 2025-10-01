@@ -72,7 +72,22 @@
 			}
 			updateTotalProductsCard();
 
-			loadCard('card-2', 'Low Stock', '—');
+			// Update product and unit count cards
+			async function updateProductAndUnitCountCards() {
+				try {
+					const resp = await fetch('/products/data');
+					const products = await resp.json();
+					const productCount = products.length;
+					const unitCount = products.reduce((sum, p) => sum + (p.quantity || 0), 0);
+					loadCard('card-1', 'Product Count', productCount);
+					loadCard('card-2', 'Total Stock', unitCount);
+				} catch (e) {
+					loadCard('card-1', 'Product Count', '—');
+					loadCard('card-2', 'Total Stock', '—');
+				}
+			}
+			updateProductAndUnitCountCards();
+
 			loadCard('card-3', 'Pending Orders', '—');
 
 			// Load recent products from /products/data API endpoint
@@ -110,11 +125,11 @@
 
       const socket = io();
       socket.on('productCreated', function(product) {
-        updateTotalProductsCard();
+        updateProductAndUnitCountCards();
         loadRecent();
       });
       socket.on('productDeleted', function(data) {
-        updateTotalProductsCard();
+        updateProductAndUnitCountCards();
         loadRecent();
       });
       socket.on('userCount', function(count) {
