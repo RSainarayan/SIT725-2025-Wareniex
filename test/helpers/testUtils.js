@@ -51,7 +51,12 @@ const createTestProduct = async (productData = {}) => {
     sku: `TEST-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, // Generate unique SKU
     quantity: 10,
     location: 'Warehouse A',
-    weight: 1.5
+    weight: 1.5,
+    // Support additional fields from tests
+    code: productData.code,
+    price: productData.price,
+    stockQuantity: productData.stockQuantity,
+    stockWeight: productData.stockWeight
   };
   
   const product = { ...defaultProduct, ...productData };
@@ -66,20 +71,37 @@ const createTestProduct = async (productData = {}) => {
 const createTestStockIntake = async (intakeData = {}) => {
   let product = intakeData.product;
   
+  if (!product && intakeData.productId) {
+    product = await Product.findById(intakeData.productId);
+  }
+  
   if (!product) {
     product = await createTestProduct();
   }
   
   const defaultIntake = {
     product: product._id,
-    quantity: 5,
-    totalWeight: 7.5,
-    singleWeight: 1.5,
-    receivedBy: 'test@example.com'
+    quantity: intakeData.quantity || 5,
+    totalWeight: intakeData.weight || intakeData.totalWeight || 7.5,
+    singleWeight: product.weight || 1.5,
+    receivedBy: intakeData.receivedBy || 'test@example.com',
+    notes: intakeData.notes
   };
   
   const intake = { ...defaultIntake, ...intakeData };
   intake.product = product._id;
+  
+  // Update product stock when creating test intake
+  if (intake.quantity) {
+    product.quantity = (product.quantity || 0) + intake.quantity;
+    if (product.stockQuantity !== undefined) {
+      product.stockQuantity = (product.stockQuantity || 0) + intake.quantity;
+    }
+    if (product.stockWeight !== undefined && intake.totalWeight) {
+      product.stockWeight = (product.stockWeight || 0) + intake.totalWeight;
+    }
+    await product.save();
+  }
   
   return await StockIntake.create(intake);
 };

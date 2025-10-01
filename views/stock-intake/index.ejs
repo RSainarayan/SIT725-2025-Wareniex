@@ -27,7 +27,6 @@
                 <th>Total Weight (kg)</th>
                 <th>Unit Weight (kg)</th>
                 <th>Received At</th>
-                <th>Barcode</th>
                 <th></th>
               </tr>
             </thead>
@@ -43,9 +42,12 @@
                     <img src="/stock-intake/<%= i._id %>/barcode" alt="Barcode" style="height:40px;" />
                   </td>
                   <td>
-                    <form action="/stock-intake/<%= i._id %>/delete" method="post" onsubmit="return confirm('Delete this intake?')">
-                      <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                    </form>
+                    <div class="btn-group" role="group">
+                      <a href="/stock-intake/<%= i._id %>/edit" class="btn btn-sm btn-outline-primary">Edit</a>
+                      <form action="/stock-intake/<%= i._id %>/delete" method="post" style="display: inline;" onsubmit="return confirm('Delete this intake?')">
+                        <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               <% }) %>

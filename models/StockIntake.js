@@ -6,7 +6,8 @@ const stockIntakeSchema = new mongoose.Schema({
   totalWeight: { type: Number },
   singleWeight: { type: Number },
   receivedAt: { type: Date, default: Date.now },
-  receivedBy: { type: String }
+  receivedBy: { type: String },
+  notes: { type: String } // Added notes field
 }, { timestamps: true });
 
 module.exports = mongoose.model('StockIntake', stockIntakeSchema);
