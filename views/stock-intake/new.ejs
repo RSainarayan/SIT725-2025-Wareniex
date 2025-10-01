@@ -21,7 +21,7 @@
           <label class="form-label">Product</label>
           <select name="product" id="product" class="form-select" required>
             <% products.forEach(function(p){ %>
-              <option value="<%= p._id %>" data-weight="<%= p.weight || 0 %>"><%= p.name %> (unit weight: <%= p.weight || 'N/A' %>)</option>
+              <option value="<%= p._id %>" data-weight="<%= p.weight || 0 %>" data-min-stock="<%= p.minStockLevel || 10 %>" data-current-stock="<%= p.quantity || 0 %>"><%= p.name %> (unit weight: <%= p.weight || 'N/A' %>)</option>
             <% }) %>
           </select>
         </div>
@@ -34,6 +34,12 @@
         <div class="col-md-6">
           <label class="form-label">Calculated Quantity</label>
           <div id="calculatedQty" class="form-control-plaintext">0</div>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">Minimum Stock Threshold</label>
+          <input name="minStockLevel" id="minStockLevel" type="number" min="0" step="1" class="form-control" placeholder="Enter minimum stock level" />
+          <div class="form-text">Set the minimum stock level for low stock alerts (leave empty to keep current setting)</div>
         </div>
 
         <div class="col-md-6">
@@ -51,16 +57,24 @@
       const productSelect = document.getElementById('product');
       const totalInput = document.getElementById('totalWeight');
       const calculatedDiv = document.getElementById('calculatedQty');
+      const minStockInput = document.getElementById('minStockLevel');
 
       function calc() {
         const opt = productSelect.selectedOptions[0];
         const unit = parseFloat(opt.getAttribute('data-weight')) || 0;
         const total = parseFloat(totalInput.value) || 0;
+        const currentMinStock = parseInt(opt.getAttribute('data-min-stock')) || 10;
+        const currentStock = parseInt(opt.getAttribute('data-current-stock')) || 0;
+        
+        // Update calculated quantity
         if (unit > 0 && total > 0) {
           calculatedDiv.textContent = Math.floor(total / unit);
         } else {
           calculatedDiv.textContent = 'N/A';
         }
+        
+        // Show current minimum stock level as placeholder
+        minStockInput.placeholder = `Current: ${currentMinStock} (Stock: ${currentStock})`;
       }
 
       productSelect.addEventListener('change', calc);

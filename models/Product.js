@@ -9,7 +9,8 @@ const productSchema = new mongoose.Schema({
   stockQuantity: { type: Number, default: 0 }, // Alternative stock quantity field
   stockWeight: { type: Number, default: 0 }, // Total stock weight
   location: { type: String },
-  weight: { type: Number, default: null } // Unit weight
+  weight: { type: Number, default: null }, // Unit weight
+  minStockLevel: { type: Number, default: 10 } // Minimum stock threshold for low stock alerts
 }, { timestamps: true });
 
 module.exports = mongoose.model('Product', productSchema);

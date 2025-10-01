@@ -1,10 +1,64 @@
 const StockIntake = require('../models/StockIntake');
 const Product = require('../models/Product');
 
+// Helper function to get low stock products
+const getLowStockProducts = async () => {
+  try {
+    // Find products where quantity is below minStockLevel
+    const lowStockProducts = await Product.find({
+      $expr: { $lt: ["$quantity", "$minStockLevel"] }
+    }).select('name sku quantity minStockLevel');
+    
+    console.log('Low stock products found:', lowStockProducts.length);
+    console.log('Low stock products:', lowStockProducts.map(p => ({
+      name: p.name,
+      quantity: p.quantity,
+      minStockLevel: p.minStockLevel
+    })));
+    
+    return lowStockProducts;
+  } catch (err) {
+    console.error('Error fetching low stock products:', err);
+    return [];
+  }
+};
+
+// Helper function to check if a specific product is low stock
+const isProductLowStock = (product) => {
+  return product.quantity < (product.minStockLevel || 10);
+};
+
+// Helper function to get low stock alerts for a product
+const getLowStockAlert = (product) => {
+  if (isProductLowStock(product)) {
+    return {
+      type: 'warning',
+      message: `Low Stock Alert: ${product.name} has only ${product.quantity} units left (threshold: ${product.minStockLevel || 10})`
+    };
+  }
+  return null;
+};
+
 // Render list page
 exports.pageIndex = async (req, res) => {
-  const intakes = await StockIntake.find().populate('product').sort({ createdAt: -1 });
-  res.render('stock-intake/index', { intakes });
+  try {
+    const intakes = await StockIntake.find().populate('product').sort({ createdAt: -1 });
+    const lowStockProducts = await getLowStockProducts();
+    const lowStockAlerts = lowStockProducts.map(product => getLowStockAlert(product)).filter(alert => alert);
+    
+    res.render('stock-intake/index', { 
+      intakes, 
+      lowStockAlerts,
+      lowStockCount: lowStockProducts.length 
+    });
+  } catch (err) {
+    console.error('Error rendering stock intake index:', err);
+    res.render('stock-intake/index', { 
+      intakes: [], 
+      lowStockAlerts: [],
+      lowStockCount: 0 
+    });
+  }
 };
 
 // Render new intake form
@@ -19,7 +73,7 @@ exports.create = async (req, res) => {
     // Support both API (productId) and form (product) field names
     const productId = req.body.product || req.body.productId;
     const weight = req.body.totalWeight || req.body.weight;
-    const { quantity, receivedBy, notes } = req.body;
+    const { quantity, receivedBy, notes, minStockLevel } = req.body;
     
     // Check if this is an API request - chai sets application/json when using .send() with objects
     const isAPIRequest = req.get('Content-Type')?.includes('application/json') || 
@@ -33,6 +87,15 @@ exports.create = async (req, res) => {
         return res.status(404).json({ error: errorMsg });
       }
       return res.status(400).send(errorMsg);
+    }
+
+    // Update minStockLevel if provided
+    if (minStockLevel !== undefined && minStockLevel !== null && minStockLevel !== '') {
+      const newMinStockLevel = parseInt(minStockLevel);
+      if (!isNaN(newMinStockLevel) && newMinStockLevel >= 0) {
+        product.minStockLevel = newMinStockLevel;
+        await product.save();
+      }
     }
 
     // Handle different input methods
@@ -104,8 +167,49 @@ exports.create = async (req, res) => {
     }
     await product.save();
 
+    console.log(`Stock intake created for ${product.name}:`, {
+      previousQuantity: (product.quantity || 0) - calculatedQty,
+      addedQuantity: calculatedQty,
+      newQuantity: product.quantity,
+      minStockLevel: product.minStockLevel
+    });
+
     const io = req.app.get('io');
-    if (io) io.emit('stockIntakeCreated', intake);
+    if (io) {
+      io.emit('stockIntakeCreated', intake);
+      
+      // Always check and emit low stock count after stock intake
+      const lowStockProducts = await getLowStockProducts();
+      const lowStockCount = lowStockProducts.length;
+      
+      console.log(`Emitting low stock alert - Count: ${lowStockCount}`);
+      
+      // Emit low stock alert with current count (this updates dashboard)
+      io.emit('lowStockAlert', {
+        count: lowStockCount,
+        products: lowStockProducts.map(p => ({
+          _id: p._id,
+          name: p.name,
+          quantity: p.quantity,
+          minStockLevel: p.minStockLevel
+        }))
+      });
+      
+      // If the current product is specifically low stock, show additional notification
+      const currentProductLowStock = isProductLowStock(product);
+      if (currentProductLowStock) {
+        console.log(`Product ${product.name} is low stock - showing notification`);
+        io.emit('lowStockNotification', {
+          message: `${product.name} is below minimum stock level (${product.quantity}/${product.minStockLevel})`,
+          product: {
+            _id: product._id,
+            name: product.name,
+            quantity: product.quantity,
+            minStockLevel: product.minStockLevel
+          }
+        });
+      }
+    }
 
     // Return appropriate response based on request type
     if (isAPIRequest) {
@@ -414,5 +518,38 @@ exports.delete = async (req, res) => {
   } catch (err) {
     console.error('Error deleting stock intake', err);
     res.status(500).send('Server error');
+  }
+};
+
+// API: Get low stock products count
+exports.apiLowStockCount = async (req, res) => {
+  try {
+    const lowStockProducts = await getLowStockProducts();
+    res.json({ 
+      count: lowStockProducts.length,
+      products: lowStockProducts 
+    });
+  } catch (err) {
+    console.error('Error fetching low stock count:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+// API: Get all low stock products
+exports.apiLowStockProducts = async (req, res) => {
+  try {
+    const lowStockProducts = await getLowStockProducts();
+    const lowStockAlertsData = lowStockProducts.map(product => ({
+      ...product.toObject(),
+      alert: getLowStockAlert(product)
+    }));
+    
+    res.json({ 
+      count: lowStockProducts.length,
+      products: lowStockAlertsData 
+    });
+  } catch (err) {
+    console.error('Error fetching low stock products:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 };
